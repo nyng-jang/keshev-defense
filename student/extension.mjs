@@ -106,7 +106,69 @@ export function createStudentView() {
 
       return root;
     },
-    renderDecision() { return '학생 구현 대기: 서버의 판정과 이유를 연결하세요.'; },
+    renderDecision({ status, mode, data, error, appId } = {}) {
+      const root = document.createElement('div');
+      root.className = 'student-decision';
+
+      const addText = (text, parent = root, tag = 'p') => {
+        const node = document.createElement(tag);
+        node.textContent = String(text);
+        parent.appendChild(node);
+        return node;
+      };
+      const appText = (id) => (typeof id === 'string' && id ? `앱 ID: ${id}` : '앱 ID: 확인 불가');
+
+      // 1) 요청 상태 구분: idle · loading · ok · error. 그 밖의 값은 확인 불가로 처리합니다.
+      if (status === 'idle') {
+        addText('앱을 골라 접속을 요청하세요.');
+        return root;
+      }
+      if (status === 'loading') {
+        addText(`판정 확인 중 · ${appText(appId)}`);
+        return root;
+      }
+      if (status === 'error') {
+        // 4) 요청 실패는 서버의 거부 판정과 다릅니다.
+        const message = typeof error?.message === 'string' && error.message
+          ? error.message
+          : '서버가 오류 메시지를 제공하지 않았습니다.';
+        const failLine = addText(`요청 실패: ${message}`);
+        failLine.style.fontWeight = 'bold';
+        addText(appText(appId));
+        addText('거부(deny) 판정이 아닙니다. 서버의 판정을 받지 못했으므로 허용되지 않음으로 표시합니다.');
+        return root;
+      }
+      if (status !== 'ok' || !data || typeof data !== 'object') {
+        addText('판정: 확인 불가(unknown) · 허용되지 않음');
+        addText(`요청 상태를 확인할 수 없습니다${status == null ? '' : ` (받은 값: ${String(status)})`}.`);
+        return root;
+      }
+
+      // 2) 판정 표시: 한국어 뜻과 원래 코드값을 함께 적습니다. 목록에 없는 값은 확인 불가입니다.
+      const decisionLabels = {
+        allow: '허용(allow)',
+        deny: '거부(deny)',
+        challenge: '추가 확인 필요(challenge)',
+        unknown: '확인 불가(unknown)',
+      };
+      const known = Object.hasOwn(decisionLabels, data.decision);
+      const decision = known ? data.decision : 'unknown';
+      addText(appText(data.appId ?? appId));
+      const decisionLine = addText(`판정: ${decisionLabels[decision]}`);
+      decisionLine.style.fontWeight = 'bold';
+      if (!known) {
+        addText(`서버가 보낸 판정 값을 확인할 수 없습니다 (받은 값: ${data.decision == null ? '없음' : String(data.decision)}). 허용되지 않음.`);
+      } else if (decision === 'unknown') {
+        addText('서버가 판정을 확인하지 못했습니다. 허용되지 않음.');
+      } else if (decision === 'challenge') {
+        addText('추가 인증 또는 확인이 필요합니다. 이 화면은 추가 확인 절차를 대신 수행하지 않습니다.');
+      }
+
+      // 3) 판정 이유와 판정 시각을 함께 적습니다.
+      addText(`판정 이유: ${typeof data.reason === 'string' && data.reason ? data.reason : '확인 불가'}`);
+      addText(`판정 시각: ${typeof data.checkedAt === 'string' && data.checkedAt ? data.checkedAt : '확인 불가'}`);
+      return root;
+    },
     renderEvents() { return '학생 구현 대기: 본인 접속·XDR 기록을 연결하세요.'; },
     renderStatus() { return '학생 구현 대기: 기기·세션·알림과 연결 점검 상태를 구분하세요.'; },
     renderVulnerabilities() { return '학생 구현 대기: 정확한 설치 버전·OSV 출처·조회 시각·부분 결과·조회 실패를 구분하세요.'; },

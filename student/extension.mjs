@@ -750,6 +750,140 @@ export function createStudentView() {
       addText(`설명 시각: ${typeof checkedAt === 'string' && checkedAt ? checkedAt : '확인 불가'}`);
       return root;
     },
-    renderAction() { return '학생 구현 대기: 현재 사건·조치·실제 대상·사람 확인·ACK와 원천 효과·unknown을 구분하세요.'; },
+    // 19단계: 조치 제안·사람 확인·서버 접수(ACK)·실제 효과 관측을 구분해 표시합니다.
+    // 버튼·POST 요청·확인 티켓은 만들지 않습니다. 조작은 제공 화면 버튼으로만 합니다.
+    // 호출마다 새 root를 만들므로 새 입력이 오면 이전 대상·요청·결과는 남지 않습니다.
+    renderAction({ status, event, actionId, target, receipt, observation, message, confirmationExpiresAt, error } = {}) {
+      const root = document.createElement('div');
+      root.className = 'student-action';
+
+      const addText = (text, parent = root, tag = 'p') => {
+        const node = document.createElement(tag);
+        node.textContent = String(text);
+        parent.appendChild(node);
+        return node;
+      };
+      const secretPattern = /(?:Bearer\s|sk-[A-Za-z0-9_-]{6,}|PRIVATE KEY|api[_ -]?key|authorization|password|token|confirmationId|비밀번호|토큰)/i;
+      const safeText = (value, fallback) => {
+        if (typeof value !== 'string' || !value) return fallback;
+        if (secretPattern.test(value) || value.length > 300) return '표시하지 않음(비밀값 형식일 수 있음)';
+        return value;
+      };
+      const safeCode = (value) => (typeof value === 'string' && /^[A-Z0-9_]{1,64}$/.test(value) ? value : '코드 없음');
+      const has = (value) => (typeof value === 'string' && value !== '') || Number.isSafeInteger(value);
+
+      const BTN_CONFIRM = '「대상과 조치를 확인했으며 집행합니다」';
+      const BTN_RESULT = '「원천 결과만 재조회」';
+      const BTN_CANCEL = '「조치 화면 취소」';
+
+      // 1) 현재 사건과 받은 영수증이 같은 의도(사건·조치)에 묶여 있는지 확인합니다.
+      const eventId = has(event?.id) ? event.id : null;
+      const bindingMismatch = Boolean(receipt) && (
+        (has(receipt.eventId) && receipt.eventId !== eventId)
+        || (has(receipt.actionId) && receipt.actionId !== actionId));
+
+      // 2) succeeded는 원천 관측으로 effectApplied===true일 때만 효과 확인입니다. 아니면 결과 불명으로 내립니다.
+      const effectConfirmed = status === 'succeeded' && observation?.effectApplied === true && has(observation?.observedAt);
+      let shown = status;
+      if (status === 'succeeded' && !effectConfirmed) shown = 'unknown';
+      if (bindingMismatch && ['pending', 'succeeded', 'denied', 'failed'].includes(shown)) shown = 'unknown';
+
+      const labels = {
+        idle: '아직 미실행(idle)',
+        loading: '조치 준비 또는 결과 조회 중(loading) · 결과 미확인',
+        prepared: '준비됨·미실행(prepared)',
+        executing: '서버에 전달 중(executing) · 결과가 아직 없음 · 완료 아님',
+        pending: '서버 접수·처리 중(pending) · 접수 응답(ACK)은 효과 확인이 아님',
+        succeeded: '효과 확인(succeeded)',
+        denied: '거절(denied)',
+        failed: '실패(failed)',
+        unknown: '결과 불명(unknown) · 성공으로도 효과 없음으로도 판단 금지',
+        expired: '확인 기한 지남(expired) · 다시 준비 필요',
+        error: '요청 처리 안 됨(error)',
+      };
+      const known = Object.hasOwn(labels, shown);
+      root.setAttribute('data-state', known ? shown : 'unknown');
+      const head = addText(known ? labels[shown] : `조치 상태 확인 불가(받은 값: ${String(status)}) · 성공으로 판단하지 않음`);
+      head.setAttribute('role', ['error', 'denied', 'failed', 'expired'].includes(shown) ? 'alert' : 'status');
+      head.style.fontWeight = 'bold';
+
+      // 3) 상태별 안내
+      if (shown === 'idle') {
+        addText('조치 제안은 아직 실행되지 않았습니다. AI 제안은 실행이 아니며, 사람이 확인하기 전에는 집행되지 않습니다.');
+        addText('연동 시스템이 지원하는 조치가 없는 기록(supportedActions 빈 배열)에서는 조치 준비 버튼이 나오지 않는 것이 정상입니다.');
+        if (has(message)) addText(`제공 화면 안내: ${safeText(message, '')}`);
+      } else if (shown === 'loading') {
+        addText('원천에 확인하는 중입니다. 아직 결과가 확인되지 않았습니다.');
+      } else if (shown === 'prepared') {
+        addText('아직 집행되지 않았습니다. 아래 사건·조치·실제 대상·확인 기한을 읽은 뒤 사람이 직접 판단하세요.');
+        addText(`집행하려면 제공 화면의 ${BTN_CONFIRM} 버튼을 직접 누르세요. 이 칸에는 집행 버튼이 없습니다.`);
+        addText(`확인 기한: ${has(confirmationExpiresAt) ? confirmationExpiresAt : '확인 불가'}`);
+      } else if (shown === 'executing') {
+        addText('사람 확인 후 서버로 전달하고 있습니다. 서버 응답과 원천 효과는 아직 확인되지 않았습니다.');
+        addText(`같은 조치를 다시 집행하려 하지 마세요. 응답이 늦으면 ${BTN_RESULT} 버튼으로 결과만 조회하세요.`);
+      } else if (shown === 'pending') {
+        addText('서버가 요청을 받았다는 뜻일 뿐입니다. 원천에서 효과가 관측되지 않았으므로 완료 아님입니다.');
+        addText(`다시 집행하지 말고 ${BTN_RESULT} 버튼으로 결과만 조회하세요.`);
+      } else if (shown === 'succeeded') {
+        addText(`관측 시각: ${observation.observedAt}`);
+        addText('effectApplied: true');
+        addText(`receiptId: ${has(receipt?.receiptId) ? receipt.receiptId : '확인 불가'}`);
+        addText('연동 시스템이 위 시각에 실제 효과를 관측했습니다. 관측 시각 이후의 상태는 다시 조회해 확인하세요.');
+      } else if (shown === 'denied' || shown === 'failed') {
+        addText(`연동 시스템 ${shown === 'denied' ? '거절' : '실패'} 사유: ${safeText(message, '서버가 사유를 제공하지 않았습니다.')}`);
+        addText('조치 효과가 적용되었다고 보지 않습니다.');
+      } else if (shown === 'unknown') {
+        if (status === 'succeeded') addText('succeeded를 받았지만 원천 관측(effectApplied: true와 관측 시각)이 없어 효과 확인으로 보지 않습니다.');
+        if (bindingMismatch) addText('받은 영수증의 사건 또는 조치가 현재 사건·조치와 다릅니다. 이 결과를 현재 조치의 결과로 쓰지 않습니다.');
+        addText(`이미 전달된 조치일 수 있습니다. 다시 집행하지 말고 ${BTN_RESULT} 버튼으로 결과만 재조회하세요.`);
+      } else if (shown === 'expired') {
+        addText('사람 확인 기한이 지나 이번 준비로는 집행할 수 없습니다. 필요하면 AI 제안에서 조치를 다시 준비하세요.');
+      } else if (shown === 'error') {
+        addText(`오류 코드: ${safeCode(error?.code)}`);
+        addText(`안내: ${safeText(error?.message, '서버가 오류 메시지를 제공하지 않았습니다.')}`);
+        addText('요청이 처리되지 않았으므로 성공으로 보지 않습니다.');
+      }
+      if (shown !== 'error' && error && typeof error === 'object') {
+        addText(`오류 코드: ${safeCode(error.code)} · ${safeText(error.message, '메시지 없음')}`);
+      }
+      if (receipt?.replayed === true) {
+        addText('중복 요청 방지: 같은 요청(requestId)의 기존 결과를 다시 받은 응답(replayed: true)입니다. 새로 집행된 것이 아닙니다.');
+      }
+      if (receipt?.superseded === true) {
+        addText('이전 조회 결과는 최신 결과를 대신하지 않습니다(superseded). 결과만 다시 조회하세요.');
+      }
+
+      // 4) 받은 범위의 식별자만 글자로 표시합니다. 없는 값은 만들지 않습니다.
+      const rows = [];
+      if (eventId) rows.push(['사건 ID(event.id)', eventId]);
+      const evidenceIds = Array.isArray(event?.evidence) ? event.evidence.map((row) => row?.id).filter(has) : [];
+      if (evidenceIds.length > 0) rows.push(['근거 ID', evidenceIds.join(', ')]);
+      if (has(actionId)) rows.push(['조치(actionId)', actionId]);
+      if (target && has(target.id)) rows.push(['실제 대상(target.id)', target.id]);
+      if (target && has(target.generation)) rows.push(['대상 세대(target.generation)', target.generation]);
+      if (has(receipt?.requestId)) rows.push(['요청 ID(requestId)', receipt.requestId]);
+      if (has(receipt?.receiptId)) rows.push(['영수증 ID(receiptId)', receipt.receiptId]);
+      if (has(receipt?.version)) rows.push(['버전(version)', receipt.version]);
+      if (has(receipt?.status)) rows.push(['서버 응답 상태(receipt.status)', receipt.status]);
+      if (rows.length > 0) {
+        const kv = document.createElement('dl');
+        for (const [key, value] of rows) {
+          addText(key, kv, 'dt');
+          addText(value, kv, 'dd');
+        }
+        root.appendChild(kv);
+      }
+
+      if (shown !== 'idle') {
+        addText(`${BTN_CANCEL}는 이 화면만 닫습니다. 이미 서버에 전달된 조치의 효과를 되돌리지 않습니다.`);
+      }
+
+      // 5) 현재 사건에 묶여 정상적으로 그린 경우에만 표식을 붙입니다.
+      if (eventId && known && !bindingMismatch) {
+        root.setAttribute('data-student-action-event', eventId);
+        if (has(receipt?.requestId)) root.setAttribute('data-student-action-request', receipt.requestId);
+      }
+      return root;
+    },
   };
 }

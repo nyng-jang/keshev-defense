@@ -70,6 +70,9 @@
 cd "C:\Users\User\AppData\Local\ALEPH\Workbench\projects\케셰브-방어전\on-client"
 ```
 
+위 경로는 내 PC의 예시입니다. 다른 PC에서는 저장소를 받은 폴더로 이동합니다.
+주의: Git 폴더를 사용자 폴더 바로 아래(`C:\Users\<이름>\<저장소>`)에 두면 실행 도구가 `ALEKOV_NATIVE_PREPARE_NESTED`로 멈춥니다. `C:\Users\<이름>\<프로젝트 폴더>\on-client`처럼 한 단계 안에 받습니다. (22단계 새 폴더 재현에서 실제 확인)
+
 ### 4-2. 필요 프로그램 확인
 
 ```powershell
@@ -122,7 +125,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\start-alekov.ps1 -De
 | 명령 | 하는 일 | 확인 |
 |---|---|---|
 | `...start-alekov.ps1 -Background` | 창 없이 뒤에서 실행, 프로세스 번호 표시 | 실제 확인 |
-| `...start-alekov.ps1 -Port 5190` | 5189 대신 다른 포트 | 미확인 (코드만 읽음) |
+| `...start-alekov.ps1 -Port 5190` | 5189 대신 다른 포트 | 실제 확인 (22단계 새 폴더 재현, `docs/STUDENT_RELEASE_RECORD.md`) |
 | `npm run check` | `student/extension.mjs` 문법만 검사 (`node --check`) | 실제 확인. 종료 코드 0 |
 | `npm start` | `node src/server.mjs` 실행 | 미확인 (실행 안 함) |
 | `npm run demo` | `node src/server.mjs --demo` 실행 | 미확인 (실행 안 함) |
